@@ -11,7 +11,7 @@ fora de risco.
 
 Uso:
     python -m dark_channels.render --channel exemplo \
-        --narracao data/exemplo/<roteiro>/narracao/narracao.json \
+        --narracao data/exemplo/<roteiro>/narracao/manifesto.json \
         --midias data/exemplo/<roteiro>/midias.json \
         --saida data/exemplo/<roteiro>/video.mp4
 """
@@ -20,12 +20,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from .voice import probe_duration, run_ffmpeg
 
 LARGURA, ALTURA = 1920, 1080
 FPS = 30
+
+# Folga ao comparar a duração do vídeo com a do manifesto. Um frame a 30 fps
+# são 33 ms; abaixo disso é arredondamento de contêiner, não fala cortada.
+TOLERANCIA_SEGUNDOS = 1.0 / FPS
 
 # Fontes de mídia que o time aceita. Material de terceiros fora desta lista não
 # entra em vídeo nosso.
@@ -113,20 +118,47 @@ def e_video(path: str | Path) -> bool:
     return Path(path).suffix.lower() in EXTENSOES_VIDEO
 
 
+def duracoes_da_linha_do_tempo(manifest: dict) -> list[float]:
+    """Quanto tempo cada cena fica na tela, segundo a linha do tempo do áudio.
+
+    Não é a duração da fala: entre uma cena e outra o voice.py insere uma
+    pausa, e esse silêncio também precisa de imagem. Usar só
+    ``cena["duration"]`` deixa o vídeo mais curto que a narração e corta a
+    última frase — o manifesto é o contrato, e quem manda nele é o áudio.
+    """
+    cenas = manifest["scenes"]
+    total = float(manifest.get("total_duration") or cenas[-1]["end"])
+    duracoes = []
+    for posicao, cena in enumerate(cenas):
+        inicio = float(cena["start"])
+        fim = float(cenas[posicao + 1]["start"]) if posicao + 1 < len(cenas) else total
+        duracoes.append(round(max(fim - inicio, 1.0 / FPS), 3))
+    return duracoes
+
+
 def segmento_de_cena(midia: dict, duracao: float, saida: Path,
                      movimento: bool = True) -> Path:
-    """Gera um trecho de vídeo mudo, do tamanho exato da narração da cena."""
+    """Gera um trecho de vídeo mudo, do tamanho exato da narração da cena.
+
+    Arredonda os frames para cima: é melhor sobrar um frame de imagem, que o
+    ``-shortest`` da mixagem apara, do que faltar e cortar a voz.
+
+    Quem decide o tamanho é ``-frames:v``, não ``-t`` na entrada. Com ``-t`` o
+    ffmpeg limita a entrada antes, e uma duração que não cai em frame inteiro
+    entrega um frame a menos do que foi pedido — foi o que encurtou a
+    montagem em 0,34 s no primeiro teste.
+    """
     origem = str(Path(midia["path"]).resolve())
-    frames = max(int(round(duracao * FPS)), 1)
+    frames = max(math.ceil(duracao * FPS), 1)
 
     if e_video(origem):
-        # Vídeo: corta no tamanho da cena e dá a volta se for curto demais.
+        # Vídeo: dá a volta quantas vezes precisar; -frames:v corta no ponto.
         filtro = (
             f"scale={LARGURA}:{ALTURA}:force_original_aspect_ratio=increase,"
             f"crop={LARGURA}:{ALTURA},fps={FPS},format=yuv420p"
         )
         run_ffmpeg([
-            "-stream_loop", "-1", "-t", f"{duracao}", "-i", origem,
+            "-stream_loop", "-1", "-i", origem,
             "-an", "-vf", filtro, "-frames:v", str(frames),
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-pix_fmt", "yuv420p", "-r", str(FPS), str(saida),
@@ -149,7 +181,7 @@ def segmento_de_cena(midia: dict, duracao: float, saida: Path,
             f"crop={LARGURA}:{ALTURA},format=yuv420p"
         )
     run_ffmpeg([
-        "-loop", "1", "-t", f"{duracao}", "-i", origem,
+        "-loop", "1", "-i", origem,
         "-an", "-vf", filtro, "-frames:v", str(frames),
         "-c:v", "libx264", "-preset", "medium", "-crf", "20",
         "-pix_fmt", "yuv420p", "-r", str(FPS), str(saida),
@@ -216,11 +248,12 @@ def render(narracao_manifest: str | Path, midias: str | Path, saida: str | Path,
     trabalho = saida.parent / "segmentos"
     trabalho.mkdir(parents=True, exist_ok=True)
 
+    duracoes = duracoes_da_linha_do_tempo(manifest)
     segmentos = []
-    for cena, midias_da_cena in zip(cenas, distribuidas):
+    for cena, midias_da_cena, duracao_na_tela in zip(cenas, distribuidas, duracoes):
         destino = trabalho / f"cena-{cena['index']:03d}.mp4"
         segmento_de_cena(
-            midias_da_cena[0], cena["duration"], destino, movimento=movimento
+            midias_da_cena[0], duracao_na_tela, destino, movimento=movimento
         )
         segmentos.append(destino)
 
@@ -231,6 +264,13 @@ def render(narracao_manifest: str | Path, midias: str | Path, saida: str | Path,
     juntar_audio_e_video(video_mudo, narracao_audio, saida, musica=musica)
 
     duracao = probe_duration(saida)
+    esperado = float(manifest.get("total_duration") or cenas[-1]["end"])
+    if duracao + TOLERANCIA_SEGUNDOS < esperado:
+        raise RuntimeError(
+            f"A montagem ficou em {duracao:.3f}s, abaixo dos {esperado:.3f}s de "
+            "narração do manifesto: o fim da fala foi cortado. Confira as "
+            "durações das cenas e as pausas entre elas."
+        )
     usadas = [
         {k: v for k, v in m[0].items() if k in ("path", "source", "license", "credit", "url")}
         for m in distribuidas
@@ -248,7 +288,7 @@ def render(narracao_manifest: str | Path, midias: str | Path, saida: str | Path,
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--channel")
-    p.add_argument("--narracao", required=True, help="narracao.json gerado pelo voice.py")
+    p.add_argument("--narracao", required=True, help="manifesto.json gerado pelo voice.py")
     p.add_argument("--midias", required=True, help="Manifesto de mídias com licenças")
     p.add_argument("--saida", required=True)
     p.add_argument("--musica", help="Manifesto JSON de uma trilha (com licença)")

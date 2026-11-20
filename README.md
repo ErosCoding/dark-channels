@@ -58,16 +58,16 @@ python -m dark_channels.script --channel exemplo --topic "O mistério do voo 914
 python -m dark_channels.voice --channel exemplo --script queue/exemplo/<arquivo>.json
 
 # 5. Montar o vídeo longo (precisa do manifesto de mídias, com licenças)
-python -m dark_channels.render --narracao data/exemplo/<roteiro>/narracao/narracao.json \
+python -m dark_channels.render --narracao data/exemplo/<roteiro>/narracao/manifesto.json \
     --midias data/exemplo/<roteiro>/midias.json --saida data/exemplo/<roteiro>/video.mp4
 
 # 6. Queimar a legenda no vídeo longo
-python -m dark_channels.subtitles --narracao data/exemplo/<roteiro>/narracao/narracao.json \
+python -m dark_channels.subtitles --narracao data/exemplo/<roteiro>/narracao/manifesto.json \
     --queimar data/exemplo/<roteiro>/video.mp4 --saida data/exemplo/<roteiro>/video-legendado.mp4
 
 # 7. Gerar os Shorts verticais que o roteiro pediu
 python -m dark_channels.shorts --roteiro queue/exemplo/<arquivo>.json \
-    --narracao data/exemplo/<roteiro>/narracao/narracao.json \
+    --narracao data/exemplo/<roteiro>/narracao/manifesto.json \
     --video data/exemplo/<roteiro>/video.mp4 --pasta data/exemplo/<roteiro>/shorts
 
 # 8. Enviar um vídeo pronto, agendado
@@ -82,7 +82,7 @@ roda inteiro na máquina e expõe um endpoint compatível com a API da OpenAI em
 uma vez para ele subir o backend local; depois o `voice.py` o encontra sozinho
 em `http://127.0.0.1:3900`.
 
-O `voice.py` gera **um arquivo por cena** e um manifesto `narracao.json` com a
+O `voice.py` gera **um arquivo por cena** e um manifesto `manifesto.json` com a
 duração medida de cada uma. Esse manifesto é o que sincroniza visuais, legendas
 e cortes verticais — nenhum passo seguinte precisa adivinhar tempo.
 
@@ -90,6 +90,22 @@ GPU com menos de 16 GB de VRAM (caso da RTX 3060): se algum motor falhar com
 `CUDA out of memory` ou `Triton compilation failed` na primeira geração, ligue
 **Configurações → Desempenho → Desativar torch.compile**, ou exporte
 `TORCH_COMPILE_DISABLE=1` antes de abrir o aplicativo.
+
+### Escreva o roteiro com acentuação correta
+
+O texto vai direto para o motor de voz, então a ortografia é a pronúncia.
+Testado em 20/11/2026: `explicacao oficial`, sem cedilha e sem til, sai falado
+como "Explicacal Oficial" e ainda faz o motor repetir o trecho no fim do
+áudio. Com `explicação oficial` a mesma frase sai correta. Vale para todo
+acento, inclusive em nomes próprios.
+
+### Licença do motor de voz
+
+O motor **não** pode ser um de `MOTORES_NAO_COMERCIAIS` (`voice.py`). O padrão
+do próprio VoiceStudio, `omnivoice` (`k2-fsa/OmniVoice`), é CC-BY-NC e não
+serve para canal monetizado — a narração é recusada antes de sair qualquer
+requisição, mesmo que o `config.yaml` do canal não traga o campo `engine`.
+O padrão do nosso código é o `supertonic3` (MIT + OpenRAIL-M).
 
 ## Mídia e licenças
 

@@ -29,15 +29,73 @@ from .config import DATA_DIR, load_channel
 # Limite do campo `input` do endpoint /v1/audio/speech (OpenAI-compatible).
 MAX_INPUT_CHARS = 4096
 
-# Padrões de voz, se o config.yaml do canal não disser nada.
+# Diferença aceitável entre a narração medida e a somada. Acima disso a
+# emenda saiu errada e a montagem cortaria fala.
+TOLERANCIA_EMENDA_SEGUNDOS = 0.05
+
+# Motores cujo modelo tem licença NÃO COMERCIAL. Narrar um vídeo monetizado
+# com qualquer um deles é violação de licença, então a narração é recusada
+# antes de sair qualquer requisição — não basta o config.yaml estar certo,
+# porque um canal novo pode simplesmente não trazer o campo `engine`.
+#
+# Conferido em 20/11/2026 com `voicestudio models license show k2-fsa/OmniVoice`:
+# "CC-BY-NC (version unspecified); Higgs Audio 2; Meta Llama 3",
+# license_category: noncommercial, commercial_inference: restricted.
+MOTORES_NAO_COMERCIAIS = frozenset({
+    "omnivoice",
+    "omnivoice-subprocess",
+    "omnivoice-gguf",
+})
+
+# ARMADILHA, para quem for conferir licença no VoiceStudio: o registro interno
+# dele em `backend/config/model_licenses.json` marca "commercial_use": false
+# para o Supertonic. Isso NÃO é proibição da licença. No mesmo registro
+# `review_status` é "unreviewed", e a auditoria do próprio aplicativo diz que
+# "commercial use is not categorically prohibited" — ou seja, o false ali quer
+# dizer "não revisado", não "proibido".
+#
+# O parecer do Monetização e Compliance de 20/11/2026 liberou o Supertonic-3
+# para uso comercial: pesos em BigScience Open RAIL-M, concessão irrevogável e
+# sem royalties, e a Seção 6 é literal — "Licensor claims no rights in the
+# Output You generate using the Model". O áudio é nosso.
+# Atribuição não é exigida, e a Seção 8 PROÍBE sugerir endosso: nunca escreva
+# algo como "narração oficial Supertone".
+# Parecer completo: Shared\2026-11-20-parecer-licenca-supertonic-3-narracao.md
+
+# Padrões de voz, se o config.yaml do canal não disser nada. O padrão é um
+# motor de licença comercial de propósito: o padrão do VoiceStudio é o
+# omnivoice, que não serve para canal monetizado.
 DEFAULT_VOICE = {
-    "engine": "omnivoice",
-    "name": "default",
+    "engine": "supertonic3",  # Supertone/supertonic-3: MIT + OpenRAIL-M
+    "name": "M1",
     "speed": 1.0,
     "language": "pt",
     "pause_between_scenes_ms": 450,
     "format": "wav",
 }
+
+
+class LicencaNaoComercialError(RuntimeError):
+    """Pedido de narração com um motor que não pode ser usado comercialmente."""
+
+
+def resolver_motor(voice: dict | None = None) -> str:
+    """Devolve o motor a usar, recusando os de licença não comercial.
+
+    É a última linha de defesa: roda em toda síntese, mesmo que o config.yaml
+    do canal não traga `engine`.
+    """
+    voice = voice or {}
+    engine = str(voice.get("engine") or DEFAULT_VOICE["engine"]).strip().lower()
+    if engine in MOTORES_NAO_COMERCIAIS:
+        raise LicencaNaoComercialError(
+            f"O motor de voz '{engine}' usa um modelo de licença não comercial "
+            "(CC-BY-NC) e não pode narrar vídeo de canal monetizado. "
+            f"Escolha um motor com licença comercial no config.yaml do canal "
+            f"(padrão atual: {DEFAULT_VOICE['engine']}) e confira em "
+            "`voicestudio models license show <repo_id>`."
+        )
+    return engine
 
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
@@ -172,13 +230,14 @@ def synthesize(text: str, out_path: str | Path, voice: dict | None = None,
     if not blocks:
         raise ValueError("Texto vazio: nada para narrar.")
 
+    engine = resolver_motor(voice)  # recusa motor de licença não comercial
     fmt = voice.get("format", "wav")
     parts: list[Path] = []
     for index, block in enumerate(blocks):
         payload = {
-            "model": voice.get("engine", "omnivoice"),
+            "model": engine,
             "input": block,
-            "voice": voice.get("name", "default"),
+            "voice": voice.get("name") or DEFAULT_VOICE["name"],
             "response_format": fmt,
             "speed": float(voice.get("speed", 1.0)),
             "language": voice.get("language", "pt"),
@@ -201,17 +260,26 @@ def synthesize(text: str, out_path: str | Path, voice: dict | None = None,
     return out_path
 
 
-def concat_audio(parts: list[Path], out_path: Path) -> Path:
-    """Junta arquivos de áudio com ffmpeg, recodificando para evitar emenda torta."""
+def concat_audio(parts: list[Path], out_path: Path,
+                 sample_rate: int | None = None) -> Path:
+    """Junta arquivos de áudio com ffmpeg, recodificando para evitar emenda torta.
+
+    A taxa de amostragem sai do primeiro arquivo, não de um número fixo: cada
+    motor de voz entrega a sua (o Supertonic-3 dá 44,1 kHz) e o demuxer concat
+    toca tudo na taxa do primeiro trecho. Fixar 24 kHz aqui fazia um silêncio
+    de 450 ms virar 245 ms no meio de uma narração de 44,1 kHz.
+    """
     if not parts:
         raise ValueError("Nenhuma parte de áudio para juntar.")
+    if sample_rate is None:
+        sample_rate = probe_sample_rate(parts[0])
     listing = out_path.with_suffix(".lista.txt")
     listing.write_text(
         "".join(f"file '{p.resolve().as_posix()}'\n" for p in parts), encoding="utf-8"
     )
     run_ffmpeg([
         "-f", "concat", "-safe", "0", "-i", str(listing),
-        "-c:a", "pcm_s16le", "-ar", "24000", "-ac", "1", str(out_path),
+        "-c:a", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1", str(out_path),
     ])
     listing.unlink(missing_ok=True)
     return out_path
@@ -225,6 +293,22 @@ def run_ffmpeg(args: list[str]) -> None:
         raise RuntimeError(
             f"ffmpeg falhou ({result.returncode}): {result.stderr.strip()[:800]}"
         )
+
+
+def probe_sample_rate(path: str | Path) -> int:
+    """Taxa de amostragem do arquivo, medida com ffprobe."""
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=sample_rate",
+         "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise RuntimeError(
+            f"ffprobe não leu a taxa de amostragem de {path}: "
+            f"{result.stderr.strip()[:400]}"
+        )
+    return int(result.stdout.strip().splitlines()[0])
 
 
 def probe_duration(path: str | Path) -> float:
@@ -259,6 +343,7 @@ def narrate_script(script: dict, out_dir: str | Path, voice: dict | None = None,
     O manifesto é o contrato que o render.py consome.
     """
     voice = voice_settings() if voice is None else voice
+    engine = resolver_motor(voice)  # recusa antes de gerar qualquer cena
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     scenes = script.get("scenes") or []
@@ -290,24 +375,42 @@ def narrate_script(script: dict, out_dir: str | Path, voice: dict | None = None,
     if not entries:
         raise ValueError("Nenhuma cena tinha narração.")
 
+    previsto = round(start - pause if pause else start, 3)
+
+    full = out_dir / f"narracao.{fmt}"
+    concat_with_pauses([out_dir / e["audio"] for e in entries], full, pause)
+    medido = probe_duration(full)
+
+    # total_duration é a duração MEDIDA do arquivo, não a soma prevista. O
+    # render.py monta a imagem em cima deste número, então ele precisa
+    # descrever o arquivo que existe. Uma divergência grande aqui é sinal de
+    # emenda errada (taxa de amostragem diferente, por exemplo) e não pode
+    # passar calada até virar fala cortada no vídeo.
+    if abs(medido - previsto) > TOLERANCIA_EMENDA_SEGUNDOS:
+        raise RuntimeError(
+            f"A narração juntada tem {medido:.3f}s, mas as cenas e as pausas "
+            f"somam {previsto:.3f}s. A emenda do áudio saiu errada; confira a "
+            "taxa de amostragem das cenas e do silêncio."
+        )
+
     manifest = {
-        "engine": voice.get("engine", "omnivoice"),
-        "voice": voice.get("name", "default"),
+        "engine": engine,
+        "voice": voice.get("name") or DEFAULT_VOICE["name"],
         "language": voice.get("language", "pt"),
         "speed": float(voice.get("speed", 1.0)),
         "pause_between_scenes_ms": voice.get("pause_between_scenes_ms", 0),
         "format": fmt,
-        "total_duration": round(start - pause if pause else start, 3),
+        "sample_rate": probe_sample_rate(full),
+        "total_duration": medido,
+        "total_duration_previsto": previsto,
+        "full_audio": full.name,
         "scenes": entries,
     }
-    manifest_path = out_dir / "narracao.json"
-    manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-    full = out_dir / f"narracao.{fmt}"
-    concat_with_pauses([out_dir / e["audio"] for e in entries], full, pause)
-    manifest["full_audio"] = full.name
+    # O manifesto NÃO se chama narracao.json de propósito: o transcrever.py do
+    # stack de edição grava <nome-do-audio>.json ao lado do áudio, e transcrever
+    # narracao.wav sobrescreveria o contrato silenciosamente. Aconteceu aqui em
+    # 20/11/2026.
+    manifest_path = out_dir / "manifesto.json"
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -315,13 +418,19 @@ def narrate_script(script: dict, out_dir: str | Path, voice: dict | None = None,
 
 
 def concat_with_pauses(parts: list[Path], out_path: Path, pause_seconds: float) -> Path:
-    """Junta as cenas inserindo silêncio entre elas."""
+    """Junta as cenas inserindo silêncio entre elas.
+
+    O silêncio é gerado na mesma taxa de amostragem das cenas. Gerar em outra
+    taxa não dá erro: o demuxer concat simplesmente toca o silêncio na taxa da
+    primeira faixa, e a pausa encurta na proporção das duas taxas.
+    """
     if pause_seconds <= 0 or len(parts) == 1:
         return concat_audio(parts, out_path)
+    sample_rate = probe_sample_rate(parts[0])
     silence = out_path.with_name("silencio.wav")
     run_ffmpeg([
         "-f", "lavfi", "-i",
-        "anullsrc=channel_layout=mono:sample_rate=24000",
+        f"anullsrc=channel_layout=mono:sample_rate={sample_rate}",
         "-t", f"{pause_seconds}", "-c:a", "pcm_s16le", str(silence),
     ])
     interleaved: list[Path] = []
@@ -329,7 +438,7 @@ def concat_with_pauses(parts: list[Path], out_path: Path, pause_seconds: float) 
         if i:
             interleaved.append(silence)
         interleaved.append(part)
-    concat_audio(interleaved, out_path)
+    concat_audio(interleaved, out_path, sample_rate=sample_rate)
     silence.unlink(missing_ok=True)
     return out_path
 
@@ -366,7 +475,7 @@ def main() -> None:
     manifest = narrate_script(payload["script"], out_dir, voice=voice, timeout=a.timeout)
     minutes = manifest["total_duration"] / 60
     print(f"{len(manifest['scenes'])} cenas narradas, {minutes:.1f} min no total.")
-    print(f"Manifesto: {out_dir / 'narracao.json'}")
+    print(f"Manifesto: {out_dir / 'manifesto.json'}")
 
 
 if __name__ == "__main__":

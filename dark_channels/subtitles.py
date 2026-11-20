@@ -12,8 +12,8 @@ Dois estilos de legenda:
                   onde os aplicativos desenham os botões
 
 Uso:
-    python -m dark_channels.subtitles --narracao .../narracao.json --saida legenda.ass
-    python -m dark_channels.subtitles --narracao .../narracao.json \
+    python -m dark_channels.subtitles --narracao .../manifesto.json --saida legenda.ass
+    python -m dark_channels.subtitles --narracao .../manifesto.json \
         --queimar video.mp4 --saida video-legendado.mp4 --estilo vertical
 """
 
@@ -203,7 +203,7 @@ def queimar(video: str | Path, legenda: str | Path, saida: str | Path) -> Path:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--narracao", required=True, help="narracao.json do voice.py")
+    p.add_argument("--narracao", required=True, help="manifesto.json do voice.py")
     p.add_argument("--saida", required=True)
     p.add_argument("--estilo", choices=sorted(ESTILOS), default="horizontal")
     p.add_argument("--queimar", help="Vídeo em que a legenda será queimada")

@@ -3,7 +3,13 @@ import json
 import pytest
 
 from dark_channels import shorts, subtitles
-from dark_channels.render import MediaError, carregar_midias, midias_por_cena, validar_midia
+from dark_channels.render import (
+    MediaError,
+    carregar_midias,
+    duracoes_da_linha_do_tempo,
+    midias_por_cena,
+    validar_midia,
+)
 
 
 def _manifest():
@@ -15,6 +21,52 @@ def _manifest():
              "start": 6.0, "end": 9.0, "duration": 3.0},
         ]
     }
+
+
+def _manifest_com_pausa():
+    # Como o voice.py grava de verdade: 450 ms de silêncio entre as cenas,
+    # então total_duration é maior que a soma das falas.
+    return {
+        "pause_between_scenes_ms": 450,
+        "total_duration": 22.84,
+        "scenes": [
+            {"index": 0, "narration": "a", "start": 0.0, "end": 8.629, "duration": 8.629},
+            {"index": 1, "narration": "b", "start": 9.079, "end": 15.858, "duration": 6.779},
+            {"index": 2, "narration": "c", "start": 16.308, "end": 22.84, "duration": 6.532},
+        ],
+    }
+
+
+# --- a imagem tem que cobrir a narração inteira ------------------------------
+
+def test_linha_do_tempo_cobre_as_pausas_entre_cenas():
+    # Somar cena["duration"] deixaria o vídeo 0,9s mais curto que a narração
+    # (duas pausas de 450 ms) e cortaria a última frase.
+    manifest = _manifest_com_pausa()
+    duracoes = duracoes_da_linha_do_tempo(manifest)
+    assert sum(duracoes) == pytest.approx(manifest["total_duration"], abs=0.002)
+    soma_das_falas = sum(c["duration"] for c in manifest["scenes"])
+    assert sum(duracoes) > soma_das_falas
+
+
+def test_linha_do_tempo_sem_pausa_bate_com_as_falas():
+    manifest = _manifest()
+    assert sum(duracoes_da_linha_do_tempo(manifest)) == pytest.approx(9.0, abs=0.002)
+
+
+def test_linha_do_tempo_da_uma_duracao_por_cena():
+    assert len(duracoes_da_linha_do_tempo(_manifest_com_pausa())) == 3
+
+
+def test_ultima_cena_vai_ate_o_fim_da_narracao():
+    duracoes = duracoes_da_linha_do_tempo(_manifest_com_pausa())
+    # A última cena segura a tela até total_duration, não até o seu próprio end.
+    assert duracoes[-1] == pytest.approx(22.84 - 16.308, abs=0.002)
+
+
+def test_nenhuma_cena_fica_com_duracao_zero():
+    manifest = _manifest_com_pausa()
+    assert all(d > 0 for d in duracoes_da_linha_do_tempo(manifest))
 
 
 # --- licenças de mídia: a regra que protege a monetização ---------------------
@@ -145,7 +197,7 @@ def test_estilo_desconhecido_falha():
 
 
 def test_deslocamento_descarta_legendas_antes_do_corte(tmp_path):
-    manifest = tmp_path / "narracao.json"
+    manifest = tmp_path / "manifesto.json"
     manifest.write_text(json.dumps(_manifest()), encoding="utf-8")
     saida = subtitles.gerar(manifest, tmp_path / "l.srt", estilo="vertical",
                             deslocamento=6.0)

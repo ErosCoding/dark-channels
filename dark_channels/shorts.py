@@ -13,7 +13,7 @@ Dois modos de enquadramento:
 
 Uso:
     python -m dark_channels.shorts --roteiro queue/exemplo/<arquivo>.json \
-        --narracao data/.../narracao.json --video data/.../video.mp4 \
+        --narracao data/.../manifesto.json --video data/.../video.mp4 \
         --pasta data/.../shorts
 """
 
@@ -171,7 +171,7 @@ def montar_todos(roteiro_path: str | Path, manifest_path: str | Path,
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--roteiro", required=True, help="Roteiro aprovado da fila")
-    p.add_argument("--narracao", required=True, help="narracao.json do voice.py")
+    p.add_argument("--narracao", required=True, help="manifesto.json do voice.py")
     p.add_argument("--video", required=True, help="Vídeo longo já montado")
     p.add_argument("--pasta", required=True, help="Pasta de saída dos Shorts")
     p.add_argument("--modo", choices=("cortar", "enquadrar"), default="cortar")

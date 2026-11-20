@@ -28,7 +28,10 @@ voice:
   # moss-tts-nano (bug do sidecar na 0.5.8), voxcpm2 (não cabe no disco).
   engine: supertonic3
   name: M1                 # voz padrão; troque por outra da lista acima
-  language: pt
+  # pt-BR explícito, não "pt". A documentação do VoiceStudio diz que "pt"
+  # sozinho já significa português brasileiro (docs/languages.md), mas a tag
+  # regional é aceita e não deixa a escolha depender de um padrão implícito.
+  language: pt-BR
   speed: 1.0
   pause_between_scenes_ms: 450
   format: wav
