@@ -65,6 +65,20 @@ def test_voice_settings_reads_the_channel_config():
     assert voz["pause_between_scenes_ms"] == 450
 
 
+# Motores cujo modelo é não comercial (CC-BY-NC e afins). Um canal que
+# monetiza não pode narrar com eles. Conferido em 20/11/2026 com
+# `voicestudio models license show k2-fsa/OmniVoice`.
+MOTORES_NAO_COMERCIAIS = {"omnivoice", "omnivoice-subprocess", "omnivoice-gguf"}
+
+
+def test_canal_nao_usa_motor_de_licenca_nao_comercial():
+    voz = voice_settings(load_channel("exemplo"))
+    assert voz["engine"] not in MOTORES_NAO_COMERCIAIS, (
+        f"O canal está configurado com '{voz['engine']}', cujo modelo é "
+        "não comercial. Isso inviabiliza a monetização do canal."
+    )
+
+
 def test_base_url_is_local_loopback_by_default(monkeypatch, tmp_path):
     monkeypatch.delenv("VOICESTUDIO_URL", raising=False)
     monkeypatch.delenv("OMNIVOICE_PORT", raising=False)

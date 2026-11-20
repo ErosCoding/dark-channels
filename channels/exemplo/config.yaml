@@ -15,8 +15,19 @@ cadence:
   timezone: America/Sao_Paulo
 voice:
   # Narração pelo VoiceStudio local (custo US$ 0, nenhuma chave de API).
-  engine: omnivoice        # omnivoice | voxcpm2 | cosyvoice | kittentts | moss-tts-nano
-  name: default            # id ou nome de um perfil de voz do VoiceStudio
+  #
+  # ATENÇÃO DE LICENÇA: o motor padrão do VoiceStudio (omnivoice, modelo
+  # k2-fsa/OmniVoice) é CC-BY-NC, ou seja, NÃO COMERCIAL. Um canal que
+  # pretende monetizar não pode usá-lo. Só troque este campo por um motor
+  # cujo modelo tenha licença comercial (apache-2.0 ou MIT), conferindo em
+  # `voicestudio models license show <repo_id>`.
+  # Validado em 20/11/2026: supertonic3 (Supertone/supertonic-3), código MIT
+  # e pesos OpenRAIL-M, que permite uso comercial. 31 idiomas, 44,1 kHz,
+  # roda em CPU. Vozes prontas: M1, M3, M4, M5, F3, F4, F5.
+  # Testados e descartados: omnivoice (CC-BY-NC, não comercial),
+  # moss-tts-nano (bug do sidecar na 0.5.8), voxcpm2 (não cabe no disco).
+  engine: supertonic3
+  name: M1                 # voz padrão; troque por outra da lista acima
   language: pt
   speed: 1.0
   pause_between_scenes_ms: 450
