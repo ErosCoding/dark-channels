@@ -13,6 +13,14 @@ cadence:
   shorts_per_week: 5
   publish_hours: ["18:00"]
   timezone: America/Sao_Paulo
+voice:
+  # Narração pelo VoiceStudio local (custo US$ 0, nenhuma chave de API).
+  engine: omnivoice        # omnivoice | voxcpm2 | cosyvoice | kittentts | moss-tts-nano
+  name: default            # id ou nome de um perfil de voz do VoiceStudio
+  language: pt
+  speed: 1.0
+  pause_between_scenes_ms: 450
+  format: wav
 youtube:
   category_id: "27"   # Educação
   default_tags: ["mistério", "história", "documentário"]
