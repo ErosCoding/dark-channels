@@ -1,0 +1,21 @@
+# Canal de exemplo. Copie esta pasta para criar um canal novo.
+name: exemplo
+language: pt-BR
+region: BR
+niche: "Mistérios e histórias reais pouco conhecidas"
+audience: "Adultos 25-45 que gostam de documentários e curiosidades"
+tone: "Narrador calmo, suspense contido, sem sensacionalismo"
+video:
+  target_minutes: 10
+  words_per_minute: 150
+cadence:
+  long_per_week: 3
+  shorts_per_week: 5
+  publish_hours: ["18:00"]
+  timezone: America/Sao_Paulo
+youtube:
+  category_id: "27"   # Educação
+  default_tags: ["mistério", "história", "documentário"]
+claude:
+  model: claude-opus-5-5
+  effort: high

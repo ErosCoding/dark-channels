@@ -1,0 +1,28 @@
+name: research
+# Roda a pesquisa de outliers sob demanda (aba Actions > research > Run workflow).
+on:
+  workflow_dispatch:
+    inputs:
+      keywords:
+        description: "Palavras-chave separadas por vírgula"
+        required: true
+      days:
+        description: "Janela em dias"
+        default: "90"
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt
+      - name: Buscar outliers
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          KEYWORDS: ${{ inputs.keywords }}
+        run: |
+          IFS=',' read -ra KW <<< "$KEYWORDS"
+          python -m dark_channels.research --days "${{ inputs.days }}" --keywords "${KW[@]}"
+      - uses: actions/upload-artifact@v4
+        with: { name: outliers, path: data/*.csv }
