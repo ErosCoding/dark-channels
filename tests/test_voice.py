@@ -65,15 +65,44 @@ def test_voice_settings_reads_the_channel_config():
     assert voz["pause_between_scenes_ms"] == 450
 
 
-def test_base_url_is_local_loopback_by_default(monkeypatch):
+def test_base_url_is_local_loopback_by_default(monkeypatch, tmp_path):
     monkeypatch.delenv("VOICESTUDIO_URL", raising=False)
     monkeypatch.delenv("OMNIVOICE_PORT", raising=False)
+    monkeypatch.setenv("VOICESTUDIO_USER_DATA", str(tmp_path))
     assert base_url() == "http://127.0.0.1:3900"
 
 
 def test_base_url_honours_env(monkeypatch):
     monkeypatch.setenv("VOICESTUDIO_URL", "http://127.0.0.1:9999/")
     assert base_url() == "http://127.0.0.1:9999"
+
+
+def _publicar(tmp_path, registro):
+    (tmp_path / "backend.json").write_text(json.dumps(registro), encoding="utf-8")
+
+
+def test_base_url_usa_a_porta_que_o_aplicativo_publicou(monkeypatch, tmp_path):
+    monkeypatch.delenv("VOICESTUDIO_URL", raising=False)
+    monkeypatch.setenv("VOICESTUDIO_USER_DATA", str(tmp_path))
+    _publicar(tmp_path, {"schema": 1, "url": "http://127.0.0.1:4123"})
+    assert base_url() == "http://127.0.0.1:4123"
+
+
+def test_registro_remoto_e_ignorado(monkeypatch, tmp_path):
+    # Um registro apontando para fora da máquina mandaria o roteiro para a rede.
+    monkeypatch.delenv("VOICESTUDIO_URL", raising=False)
+    monkeypatch.delenv("OMNIVOICE_PORT", raising=False)
+    monkeypatch.setenv("VOICESTUDIO_USER_DATA", str(tmp_path))
+    _publicar(tmp_path, {"schema": 1, "url": "http://servidor-remoto:3900"})
+    assert base_url() == "http://127.0.0.1:3900"
+
+
+def test_registro_com_esquema_desconhecido_e_ignorado(monkeypatch, tmp_path):
+    monkeypatch.delenv("VOICESTUDIO_URL", raising=False)
+    monkeypatch.delenv("OMNIVOICE_PORT", raising=False)
+    monkeypatch.setenv("VOICESTUDIO_USER_DATA", str(tmp_path))
+    _publicar(tmp_path, {"schema": 99, "url": "http://127.0.0.1:4123"})
+    assert base_url() == "http://127.0.0.1:3900"
 
 
 def _write(tmp_path, status):

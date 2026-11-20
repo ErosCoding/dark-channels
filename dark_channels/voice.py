@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -39,11 +40,43 @@ DEFAULT_VOICE = {
 }
 
 
+LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+
+def _registro_publicado() -> str | None:
+    """Endereço que o aplicativo publica em backend.json, se houver.
+
+    O VoiceStudio nem sempre usa a porta 3900: cada perfil escolhe a sua e
+    anota o endereço nesse arquivo. Só aceitamos registro local — um registro
+    apontando para fora da máquina seria mandar o texto do roteiro para a rede.
+    """
+    base = os.environ.get("VOICESTUDIO_USER_DATA")
+    pasta = Path(base).expanduser() if base else Path(
+        os.environ.get("APPDATA", Path.home() / "AppData/Roaming")
+    ) / "VoiceStudio"
+    try:
+        registro = json.loads((pasta / "backend.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(registro, dict) or registro.get("schema") != 1:
+        return None
+    url = registro.get("url")
+    if not isinstance(url, str) or registro.get("remote"):
+        return None
+    partes = urllib.parse.urlsplit(url)
+    if partes.scheme != "http" or partes.hostname not in LOOPBACK:
+        return None
+    return url.rstrip("/")
+
+
 def base_url() -> str:
     """Endereço do VoiceStudio local. Loopback não precisa de credencial."""
     explicit = os.environ.get("VOICESTUDIO_URL")
     if explicit:
         return explicit.rstrip("/")
+    publicado = _registro_publicado()
+    if publicado:
+        return publicado
     port = os.environ.get("OMNIVOICE_PORT", "3900")
     return f"http://127.0.0.1:{port}"
 
