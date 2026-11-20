@@ -10,3 +10,12 @@ out/
 *.mp3
 *.wav
 client_secret*.json
+
+# Pesos e presets de modelo de voz. NAO COMMITAR: este repo e publico, e
+# commitar peso licenciado sob OpenRAIL-M conta como Distribution, o que
+# aciona obrigacoes de licenca sobre nos (Secao 4). Parecer de Monetizacao
+# e Compliance, 20/11/2026.
+*.onnx
+*.pth
+*.safetensors
+voice_styles/
